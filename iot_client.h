@@ -13,6 +13,7 @@ class IoTClient {
   using AlertCallback = std::function<void(const std::string& location, const std::string& message)>;
   using RankingCallback = std::function<void(const std::string& title, const std::vector<SlangItem>& items)>;
   using ClearCallback = std::function<void()>;
+  using IdleStatusCallback = std::function<void(const std::string& status_msg)>;
 
   static IoTClient& GetInstance();
 
@@ -22,6 +23,7 @@ class IoTClient {
   void SetAlertCallback(AlertCallback cb) { alert_cb_ = cb; }
   void SetRankingCallback(RankingCallback cb) { ranking_cb_ = cb; }
   void SetClearCallback(ClearCallback cb) { clear_cb_ = cb; }
+  void SetIdleStatusCallback(IdleStatusCallback cb) { idle_status_cb_ = cb; }
 
   bool IsWiFiConnected() const { return WiFi.status() == WL_CONNECTED; }
   bool IsMqttConnected();
@@ -42,6 +44,7 @@ class IoTClient {
   AlertCallback alert_cb_;
   RankingCallback ranking_cb_;
   ClearCallback clear_cb_;
+  IdleStatusCallback idle_status_cb_;
 
   uint32_t last_wifi_check_ms_ = 0;
   uint32_t last_mqtt_reconnect_attempt_ms_ = 0;

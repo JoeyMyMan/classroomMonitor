@@ -85,21 +85,42 @@ void IoTClient::PublishStatus(const char* status_payload) {
 }
 
 void IoTClient::OnMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
-  // 确保字符串结尾空字符
   std::string msg((char*)payload, length);
   ESP_LOGI(TAG, "Message received on topic [%s]: %s", topic, msg.c_str());
 
-  // 尝试解析 JSON
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, msg);
 
   if (err) {
     ESP_LOGW(TAG, "JSON parse error: %s, checking raw message", err.c_str());
-    // 兼容简单非 JSON 纯文本指令
     if (msg.find("fight") != std::string::npos || msg.find("打架") != std::string::npos) {
-      if (alert_cb_) alert_cb_("未知区域", "检测到肢体冲突！");
-    } else if (msg.find("clear") != std::string::npos || msg.find("消警") != std::string::npos) {
+      if (alert_cb_) alert_cb_("监控区域", "检测到肢体冲突！");
+    } else if (msg.find("clear") != std::string::npos || msg.find("消警") != std::string::npos || msg.find("normal") != std::string::npos) {
       if (clear_cb_) clear_cb_();
+    }
+    return;
+  }
+
+  // =========================================================================
+  // 1. 打架冲突识别 (兼容 Leo6662233/meme 的 FightEngine state 与标准格式)
+  // Leo6662233/meme 输出: {"fighting": true/false, "persons": N, "running": true}
+  // =========================================================================
+  if (doc.containsKey("fighting")) {
+    bool is_fighting = doc["fighting"].as<bool>();
+    int persons = doc["persons"] | 2;
+
+    if (is_fighting) {
+      std::string location = doc["location"] | "视觉监控区";
+      std::string detail = doc["message"] | ("检测到 " + std::to_string(persons) + " 人推搡打架！");
+      if (alert_cb_) {
+        alert_cb_(location, detail);
+      }
+    } else {
+      // 打架已平息或当前正常
+      std::string status = "一切正常（检测到 " + std::to_string(persons) + " 个人）";
+      if (idle_status_cb_) {
+        idle_status_cb_(status);
+      }
     }
     return;
   }
@@ -107,36 +128,56 @@ void IoTClient::OnMqttMessage(char* topic, uint8_t* payload, unsigned int length
   std::string type = doc["type"] | "";
   std::string event = doc["event"] | "";
 
-  // 1. 打架冲突预警
+  // 标准打架预警
   if (type == "alert" || event == "fight" || type == "fight") {
-    std::string location = doc["location"] | "教室后排";
-    std::string detail = doc["message"] | "检测到疑似打架推搡！";
+    int persons = doc["persons"] | 2;
+    std::string location = doc["location"] | "视觉监控区";
+    std::string detail = doc["message"] | ("检测到 " + std::to_string(persons) + " 人推搡打架！");
     if (alert_cb_) {
       alert_cb_(location, detail);
     }
+    return;
   }
-  // 2. 流行语排名更新
-  else if (type == "ranking" || type == "slang") {
-    std::string title = doc["title"] | "四年级热词榜";
+
+  // =========================================================================
+  // 2. 流行梗排行榜 (完全适配 Leo6662233/meme 的 /api/ranking 格式)
+  // Leo6662233/meme 输出: {"ranking": [{"name": "你个老六", "count": 12, ...}]}
+  // =========================================================================
+  if (doc.containsKey("ranking") || doc.containsKey("items") || type == "ranking" || type == "meme" || type == "slang") {
+    std::string title = doc["title"] | "四年级热梗排行榜";
     std::vector<SlangItem> items;
 
-    JsonArray arr = doc["items"].as<JsonArray>();
+    JsonArray arr;
+    if (doc["ranking"].is<JsonArray>()) {
+      arr = doc["ranking"].as<JsonArray>();
+    } else if (doc["items"].is<JsonArray>()) {
+      arr = doc["items"].as<JsonArray>();
+    } else if (doc.is<JsonArray>()) {
+      arr = doc.as<JsonArray>();
+    }
+
     for (JsonObject obj : arr) {
       SlangItem item;
       item.rank = obj["rank"] | (int)(items.size() + 1);
-      item.word = obj["word"] | "";
+      // Leo6662233/meme 中梗名为 'name'，同时兼容 'word'
+      const char* name_str = obj["name"] | (obj["word"] | "");
+      item.word = name_str ? name_str : "";
       item.count = obj["count"] | 0;
+
       if (!item.word.empty()) {
         items.push_back(item);
       }
+      if (items.size() >= 5) break;  // 屏幕展示前5名
     }
 
-    if (ranking_cb_) {
+    if (!items.empty() && ranking_cb_) {
       ranking_cb_(title, items);
     }
+    return;
   }
+
   // 3. 远程消警/复位
-  else if (type == "clear" || type == "reset") {
+  if (type == "clear" || type == "reset" || doc["action"] == "dismiss") {
     if (clear_cb_) {
       clear_cb_();
     }

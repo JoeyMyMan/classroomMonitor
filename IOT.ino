@@ -108,6 +108,21 @@ void setup() {
     ResetToIdle();
   });
 
+  IoTClient::GetInstance().SetIdleStatusCallback([](const std::string& status_msg) {
+    Serial.printf("[STATUS] 收到监控状态更新: %s\n", status_msg.c_str());
+    UIState state = DisplayUI::GetInstance().GetCurrentState();
+    if (state == UIState::kAlert) {
+      AudioPlayer::GetInstance().PlaySound(SoundType::kDismiss);
+    }
+    if (state == UIState::kAlert || state == UIState::kIdle) {
+      DisplayUI::GetInstance().ShowIdle(
+          IoTClient::GetInstance().IsWiFiConnected(),
+          IoTClient::GetInstance().IsMqttConnected(),
+          status_msg.c_str());
+      SetLed(0, 40, 10);
+    }
+  });
+
   // 6. 启动 WiFi 与 IoT 客户端
   IoTClient::GetInstance().Init();
 
