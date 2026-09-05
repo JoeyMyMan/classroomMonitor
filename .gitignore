@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Arduino IDE / build caches
+*.hex
+*.bin
+*.elf
+build/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
